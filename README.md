@@ -7,7 +7,15 @@
 
 # Running the code
 To run QGCN experiments on standard dataset, run (from root of repo):
-- Setup conda environment via: `conda env create --name qgcn --file=environment.yml`
+- Setup conda virtual environment via: `conda create -n qgcn python=3.9 anaconda`
+- Among other package, the below are required:
+    * torch
+    * torch_geometric
+    * torch-scatter
+    * torch-cluster
+    * torch-sparse
+    * wget (for downloading the datasets)
+    * matplotlib (plotting library)
 - Activate the environment via: `conda activate qgcn`
 - Run experiments by running the below:
 ```python
