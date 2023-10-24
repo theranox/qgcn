@@ -3,12 +3,11 @@
 # Dependencies
 - PyTorch >= 1.1
 - PyTorch geometric >= 1.1.2
-* wget pkg is required for downloading datasets
 
 # Running the code
 To run QGCN experiments on standard dataset, run (from root of repo):
 - Setup conda virtual environment via: `conda create -n qgcn python=3.9 anaconda`
-- Among other package, the below are required:
+- Among the useful standard packages to install, the below are definitely required:
     * torch
     * torch_geometric
     * torch-scatter
