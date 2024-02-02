@@ -7,6 +7,7 @@ import pickle
 import torch.nn.functional as F
 import torch
 import time
+import statistics
 import matplotlib
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader as RawDataLoader
@@ -43,12 +44,19 @@ class Experiment:
                test_batch_size = 64,
                train_shuffle_data = True,
                test_shuffle_data = False,
+               profile_run = False,
+               walk_clock_num_runs = 10,
                id = None):
+    
+    # Controls whether we want to print runtime per model
+    self.profile_run = profile_run
+    self.walk_clock_num_runs = walk_clock_num_runs
 
     # load in the dataset ...
     data_struct = read_cached_graph_dataset(num_train=num_train, num_test=num_test, dataset_name=dataset_name)
 
     # save the references to the datasets ...
+    self.data_struct = data_struct
     raw_x_train_data = data_struct["raw"]["x_train_data"]
     raw_y_train_data = data_struct["raw"]["y_train_data"] 
     raw_x_test_data  = data_struct["raw"]["x_test_data"]  
@@ -77,7 +85,7 @@ class Experiment:
     shuffle_qgcn_geo_train_data = (len(geometric_qgcn_train_data) != 0) and train_shuffle_data
     geometric_qgcn_train_loader = GraphDataLoader(geometric_qgcn_train_data, 
                                                   batch_size=train_batch_size, 
-                                                  shuffle=shuffle_qgcn_geo_train_data)
+                                                  shuffle=shuffle_qgcn_geo_train_data,)
     shuffle_qgcn_geo_test_data  = (len(geometric_qgcn_test_data) != 0) and test_shuffle_data
     geometric_qgcn_test_loader  = GraphDataLoader(geometric_qgcn_test_data,
                                                   batch_size=test_batch_size,
@@ -130,7 +138,8 @@ class Experiment:
 
     # if this is a cache_run then load models if they exist ...
     # NB: the run directories are used by the __load_models function below ...
-    loaded_cnn_model, loaded_qgcn_model, loaded_sgcn_model = self.__load_models() 
+    # loaded_cnn_model, loaded_qgcn_model, loaded_sgcn_model = self.__load_models() 
+    loaded_cnn_model, loaded_qgcn_model, loaded_sgcn_model = None, None, None
 
     # # save the model inside experiments ...
     self.cnn_model = loaded_cnn_model
@@ -171,6 +180,98 @@ class Experiment:
       self.qgcn_model_optimizer = torch.optim.Adam(self.qgcn_model.parameters(), lr=learning_rate)
     if self.sgcn_model_exists:
       self.sgcn_model_optimizer = torch.optim.Adam(self.sgcn_model.parameters(), lr=learning_rate)
+
+    # Print model flops and num parameters:
+    self.__print_models_stats()
+  
+  
+  def __print_models_stats(self):
+    from flops_counter.ptflops import get_model_complexity_info
+    if self.cnn_model_exists:
+      data_sample = self.data_struct["raw"]["x_train_data"][0].clone().detach().unsqueeze(dim=0).to(self.device)
+      model = self.cnn_model
+      model.eval() # put model in eval mode so no params are updated
+      macs, params = get_model_complexity_info(model, data_sample, as_strings=False, print_per_layer_stat=False, verbose=False)
+      # Assuming 1 MAC = 0.5x FLOPs
+      flops, macs, params = round(2*macs / 1e3, 3), round(macs / 1e3, 3), round(params / 1e3, 3)
+      # Profile Inference Wall Time
+      wall_times = []
+      for _ in range(self.walk_clock_num_runs):
+         start_time = time.time()
+         _ = model(self.data_struct["raw"]["x_train_data"][0].clone().detach().unsqueeze(dim=0).to(self.device))
+         end_time = time.time()
+         wall_times.append(end_time - start_time)
+      wall_time_mean = statistics.mean(wall_times)
+      wall_time_std = statistics.stdev(wall_times)
+      # print stat
+      print("\n-----------------")
+      print("CNN Model Stats:")
+      print("-------------------------------------------------------------------------------------------")
+      print(f'Number of parameters: {params} k')
+      print(f'Theoretical Computational Complexity (FLOPs): {flops} kFLOPs')
+      print(f'Theoretical Computational Complexity (MACs):  {macs} kMACs')
+      print(f'Wall Clock  Computational Complexity (s):     {wall_time_mean} +/- {wall_time_std} s ')
+      print("-------------------------------------------------------------------------------------------")
+    
+    if self.sgcn_model_exists:
+      # pick the largest data (by node degree) to profile all the models
+      crit_lst = [ data.x.numel() + data.edge_index.numel() for data in self.data_struct["geometric"]["sgcn_train_data"]]
+      _, max_crit_index = max(crit_lst), crit_lst.index(max(crit_lst))
+      data_sample = self.data_struct["geometric"]["sgcn_train_data"][max_crit_index].clone().detach().to(self.device) # get data at that index for profiling
+      model = self.sgcn_model
+      model.eval() # put model in eval mode so no params are updated
+      macs, params = get_model_complexity_info(model, data_sample, as_strings=False, print_per_layer_stat=False, verbose=False)
+      # Assuming 1 MAC = 0.5x FLOPs
+      flops, macs, params = round(2*macs / 1e3, 3), round(macs / 1e3, 3), round(params / 1e3, 3)
+      # Profile Inference Wall Time
+      wall_times = []
+      for _ in range(self.walk_clock_num_runs):
+         start_time = time.time()
+         _ = model(self.data_struct["geometric"]["sgcn_train_data"][max_crit_index].clone().detach().to(self.device))
+         end_time = time.time()
+         wall_times.append(end_time - start_time)
+      wall_time_mean = statistics.mean(wall_times)
+      wall_time_std = statistics.stdev(wall_times)
+      # print stats
+      print("\n-----------------")
+      print("SGCN Model Stats:")
+      print(f"Profiling data sample: {self.data_struct['geometric']['sgcn_train_data'][max_crit_index]}")
+      print("-------------------------------------------------------------------------------------------")
+      print(f'Number of parameters: {params} k')
+      print(f'Theoretical Computational Complexity (FLOPs): {flops} kFLOPs')
+      print(f'Theoretical Computational Complexity (MACs):  {macs} kMACs')
+      print(f'Wall Clock  Computational Complexity (s):     {wall_time_mean} +/- {wall_time_std} s ')
+      print("-------------------------------------------------------------------------------------------")
+
+    if self.qgcn_model_exists:
+      # pick the largest data (by node degree) to profile all the models
+      crit_lst = [ data.x.numel() + data.edge_index.numel() for data in self.data_struct["geometric"]["qgcn_train_data"]]
+      _, max_crit_index = max(crit_lst), crit_lst.index(max(crit_lst))
+      data_sample = self.data_struct["geometric"]["qgcn_train_data"][max_crit_index].clone().detach().to(self.device) # get data at that index for profiling
+      model = self.qgcn_model
+      model.eval() # put model in eval mode so no params are updated
+      macs, params = get_model_complexity_info(model, data_sample, as_strings=False, print_per_layer_stat=False, verbose=False)
+      # Assuming 1 MAC = 0.5x FLOPs
+      flops, macs, params = round(2*macs / 1e3, 3), round(macs / 1e3, 3), round(params / 1e3, 3)
+      # Profile Inference Wall Time
+      wall_times = []
+      for _ in range(self.walk_clock_num_runs):
+         start_time = time.time()
+         _ = model(self.data_struct["geometric"]["qgcn_train_data"][max_crit_index].clone().detach().to(self.device))
+         end_time = time.time()
+         wall_times.append(end_time - start_time)
+      wall_time_mean = statistics.mean(wall_times)
+      wall_time_std = statistics.stdev(wall_times)
+      # print stats
+      print("\n-----------------")
+      print("QGCN Model Stats:")
+      print(f"Profiling data sample: {self.data_struct['geometric']['qgcn_train_data'][max_crit_index]}")
+      print("-------------------------------------------------------------------------------------------")
+      print(f'Number of parameters: {params} k')
+      print(f'Theoretical Computational Complexity (FLOPs): {flops} kFLOPs')
+      print(f'Theoretical Computational Complexity (MACs):  {macs} kMACs')
+      print(f'Wall Clock  Computational Complexity (s):     {wall_time_mean} +/- {wall_time_std} s ')
+      print("-------------------------------------------------------------------------------------------")
 
 
   def __load_models(self):
@@ -349,6 +450,7 @@ class Experiment:
     cnn_loss_all, cnn_total_graphs = 0, 0
     if self.cnn_model_exists:
       self.cnn_model.train()
+      if self.profile_run: start_time = time.time()
       for data in self.raw_train_dataloader:
         x_data, y_data = data
         x_data = x_data.to(self.device)
@@ -364,13 +466,16 @@ class Experiment:
         cnn_loss.backward()
         cnn_loss_all += len(x_data) * cnn_loss.item()
         self.cnn_model_optimizer.step()
-      print("Single epoch training... cnn_model done")
+      if self.profile_run: stop_time = time.time()
+      if self.profile_run: profile_stats = f"; Epoch took a total of {stop_time - start_time}s"
+      print(f"Single epoch training... cnn_model done{ profile_stats if self.profile_run else '' }")
     
     # for the qgcn training ...
     qgcn_loss_all, qgcn_total_graphs = 0, 0
     if self.qgcn_model_exists:
       self.qgcn_model.train()
       # begin training ...
+      if self.profile_run: start_time = time.time()
       for data in self.sp_qgcn_train_dataloader:
         qgcn_data = self.__move_graph_data_to_device(data)
         qgcn_total_graphs += qgcn_data.num_graphs
@@ -385,13 +490,16 @@ class Experiment:
         qgcn_loss_all += qgcn_data.num_graphs * qgcn_loss.item()
         self.qgcn_model_optimizer.step()
         # print("optimizer done")
-    print("Single epoch training... qgcn_model done")
+      if self.profile_run: stop_time = time.time()
+      if self.profile_run: profile_stats = f"; Epoch took a total of {stop_time - start_time}s"
+      print(f"Single epoch training... qgcn_model done{ profile_stats if self.profile_run else '' }")
 
     # for the sgcn training ...
     sgcn_loss_all, sgcn_total_graphs = 0, 0
     if self.sgcn_model_exists:
       self.sgcn_model.train()
       # begin training ...
+      if self.profile_run: start_time = time.time()
       for data in self.sp_sgcn_train_dataloader:
         sgcn_data = self.__move_graph_data_to_device(data)
         sgcn_total_graphs += sgcn_data.num_graphs
@@ -405,7 +513,9 @@ class Experiment:
         sgcn_loss.backward()
         sgcn_loss_all += sgcn_data.num_graphs * sgcn_loss.item()
         self.sgcn_model_optimizer.step()
-    print("Single epoch training... sgcn_model done")
+      if self.profile_run: stop_time = time.time()
+      if self.profile_run: profile_stats = f"; Epoch took a total of {stop_time - start_time}s"
+      print(f"Single epoch training... sgcn_model done{ profile_stats if self.profile_run else '' }")
       
     # if we want to cache the run, then cache them here ...
     if self.cache_run:
@@ -436,13 +546,17 @@ class Experiment:
         raw_dataset_loader = self.raw_test_dataloader
       # set model in eval mode ...
       self.cnn_model.eval()
+      # begin evaluation ...
+      if self.profile_run: start_time = time.time()
       for data in raw_dataset_loader:
         x_data, y_data = data
         x_data = x_data.to(self.device)
         y_data = y_data.to(self.device)
         pred = self.cnn_model(x_data).max(dim=1)[1].reshape((-1,1))
         cnn_correct += pred.eq(y_data).sum().item()
-      print(f"{'train' if eval_train_data else 'test'} data: cnn eval done")
+      if self.profile_run: stop_time = time.time()
+      if self.profile_run: profile_stats = f"; Epoch took a total of {stop_time - start_time}s"
+      print(f"{'train' if eval_train_data else 'test'} data: cnn eval done{ profile_stats if self.profile_run else '' }")
 
     # perform the evaluation for the pixels ...
     qgcn_correct = 0
@@ -453,11 +567,14 @@ class Experiment:
         sp_qgcn_dataset_loader = self.sp_qgcn_test_dataloader
       self.qgcn_model.eval()
       # begin evaluation ...
+      if self.profile_run: start_time = time.time()
       for data in sp_qgcn_dataset_loader:
         qgcn_data = self.__move_graph_data_to_device(data)
         pred = self.qgcn_model(qgcn_data).max(dim=1)[1]
         qgcn_correct += pred.eq(qgcn_data.y).sum().item()
-    print(f"{'train' if eval_train_data else 'test'} data: qgcn eval done")
+      if self.profile_run: stop_time = time.time()
+      if self.profile_run: profile_stats = f"; Epoch took a total of {stop_time - start_time}s"
+      print(f"{'train' if eval_train_data else 'test'} data: qgcn eval done{ profile_stats if self.profile_run else '' }")
 
     # perform the evaluation for the pixels ...
     sgcn_correct = 0
@@ -468,11 +585,14 @@ class Experiment:
         sp_sgcn_dataset_loader = self.sp_sgcn_test_dataloader
       self.sgcn_model.eval()
       # begin evaluation ...
+      if self.profile_run: start_time = time.time()
       for data in sp_sgcn_dataset_loader:
         sgcn_data = self.__move_graph_data_to_device(data)
         pred = self.sgcn_model(sgcn_data).max(dim=1)[1]
         sgcn_correct += pred.eq(sgcn_data.y).sum().item()
-    print(f"{'train' if eval_train_data else 'test'} data: sgcn eval done")
+      if self.profile_run: stop_time = time.time()
+      if self.profile_run: profile_stats = f"; Epoch took a total of {stop_time - start_time}s"
+      print(f"{'train' if eval_train_data else 'test'} data: sgcn eval done{ profile_stats if self.profile_run else '' }")
     
     # return total num correct as a percentage [fraction] ...
     if self.cnn_model_exists:

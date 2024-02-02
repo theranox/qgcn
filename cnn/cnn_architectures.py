@@ -35,7 +35,7 @@ class GraphEquivCNNSubModule(torch.nn.Module):
     self.bn2d = torch.nn.BatchNorm2d(out_channels, affine=use_learnable_batchNorm)
     self.maxpool2d = torch.nn.MaxPool2d(kernel_size=kernel_size-1, stride=stride, padding=1) # (size * size) -- MODIFIED
     self.relu2d = torch.nn.ReLU()
-    self.dropout2d = torch.nn.Dropout2d(dropout, inplace=False)
+    self.dropout2d = torch.nn.Dropout(dropout, inplace=False)
     # build the module list ...
     spatial_graph_conv_layer_equiv = []
     spatial_graph_conv_layer_equiv.append(self.conv2d)
@@ -133,7 +133,8 @@ class CNN(torch.nn.Module):
     for i, layer in enumerate(self.conv_layers):
       x = layer(x)
     assert not isinstance(x, type(None))
-    x = self.glob_avg_pooling(x)
+    # x = self.glob_avg_pooling(x)
+    x = torch.nn.AdaptiveAvgPool2d(1)(x)
     x = x.squeeze()
     x = self.fc(x)
     return x

@@ -42,12 +42,17 @@ def check_dataset_split_exists_else_download(dataset_split: dict, selected_datas
     # get the filename and constr full filepath for downloaded file
     full_filepath = os.path.join(dataset_split_folder, f"{selected_dataset_config['dataset_name']}.pkl")
     if not os.path.exists(full_filepath):
-        print(f"Dataset {selected_dataset_config['dataset_name'].upper()} for split: train-{train_size}, test-{test_size} doesn't exist")
-        print(f"Downloading dataset ...")
-        # Else: download the file before running experiment
-        full_data_url = selected_dataset_config["download_url"][f"train_{train_size}_test_{test_size}"]
-        wget.download(full_data_url, full_filepath)
-        print(f"\nDownload complete ...")
+        try:
+            print(f"Dataset {selected_dataset_config['dataset_name'].upper()} for split: train-{train_size}, test-{test_size} doesn't exist")
+            print(f"Downloading dataset ...")
+            # Else: download the file before running experiment
+            full_data_url = selected_dataset_config["download_url"][f"train_{train_size}_test_{test_size}"]
+            wget.download(full_data_url, full_filepath)
+            print(f"\nDownload complete ...")
+            return True
+        except:
+            print("Couldn't download dataset! Handing control to parent function")
+    return False
 
 
 # define the different datasets supported in sweep with their respective model config params
@@ -260,7 +265,7 @@ def collate_stats(stats_name, max_stats, smoothened_stats):
 Main function that runs experiments
 Initiates experiments run on standard vs custom vs all datasets
 """
-def run_qgcn_experiments(dataset_groups: list[str] = ['standard', 'custom'], notraineval: bool = False):
+def run_experiments(dataset_groups: list[str] = ['standard', 'custom'], notraineval: bool = False, profile_models: bool = True):
     """
     SWEEPING Logic below
     Loops through the different sweep parameters to train different models
@@ -279,10 +284,10 @@ def run_qgcn_experiments(dataset_groups: list[str] = ['standard', 'custom'], not
                 if selected_dataset_config['dataset_group'] != dataset_group: continue
 
                 # Check if dataset exists, if not then download
-                check_dataset_split_exists_else_download(dataset_split, selected_dataset_config)
+                if not check_dataset_split_exists_else_download(dataset_split, selected_dataset_config): continue
 
                 # Prep experiment name
-                experiment_name = f"BATCH-RESULTS-ALL-DATASETS-{selected_dataset.capitalize()}_Summary"
+                experiment_name = f"BATCH-RESULTS-ALL-DATASETS-{selected_dataset.capitalize()}_SGCN_QGCN_CNN_Summary"
                 experiments_dir = os.path.join(os.path.dirname(os.path.realpath('__file__')), "Experiments")
                 experiment_result_filepath = os.path.join(experiments_dir, f'{"_".join(experiment_name.split(" "))}.yaml')
                 averaging_window_width = 0.05 # fraction -> 5%
@@ -382,6 +387,8 @@ def run_qgcn_experiments(dataset_groups: list[str] = ['standard', 'custom'], not
                                                 test_shuffle_data = False,
                                                 id = experiment_id) # mark this experiment ...
 
+                        if profile_models: break
+
                         # run the experiment ...
                         experiment.run(num_epochs=num_epochs, eval_training_set=(not notraineval)) # specify num epochs ...
 
@@ -416,6 +423,8 @@ def run_qgcn_experiments(dataset_groups: list[str] = ['standard', 'custom'], not
                         smoothened_test_acc["cnn"].append(statistics.mean(test_cnn_acc_array[-num_averaging_window:]))
                         smoothened_test_acc["sgcn"].append(statistics.mean(test_sgcn_acc_array[-num_averaging_window:]))
                         smoothened_test_acc["qgcn"].append(statistics.mean(test_qgcn_acc_array[-num_averaging_window:]))
+                    
+                    if profile_models: break
 
                     # get collated stats
                     train_loss_cnn_results, train_loss_sgcn_results, train_loss_qgcn_results = collate_stats("train_loss", mean_train_loss, smoothened_train_loss)
@@ -434,6 +443,8 @@ def run_qgcn_experiments(dataset_groups: list[str] = ['standard', 'custom'], not
                     with open(experiment_result_filepath, "w") as file_stream:
                         yaml.dump(results, file_stream)
 
+        if profile_models: break
+
 
 """
 Args prep
@@ -442,13 +453,15 @@ import argparse
 parser = argparse.ArgumentParser(description='Reproduce experimental results for QGCN vs SGCN vs CNN on standard and custom datasets')
 parser.add_argument('-d', '--dataset', required=True, help='Type of dataset, i.e., standard / custom / all, to run experiment on')
 parser.add_argument('--notraineval', action="store_true", default=False, help='Sets boolean whether we want to evaluate the models for training accuracy')
+parser.add_argument('--profilemodels', action="store_true", default=False, help='Sets boolean whether we want to profile the models for training')
 
 args = parser.parse_args()
 notraineval = args.notraineval
+profile_models = args.profilemodels
 dataset = args.dataset.strip().lower()
 assert any([ dataset == t for t in ['standard', 'custom', 'all'] ])
 dataset_groups = ['standard', 'custom'] if dataset.lower() == 'all' else [dataset]
 
 # Validate dataset type is correct
 print(f"Running experiments on {dataset.capitalize()} Datasets")
-run_qgcn_experiments(dataset_groups=dataset_groups, notraineval=notraineval)
+run_experiments(dataset_groups=dataset_groups, notraineval=notraineval, profile_models=profile_models)

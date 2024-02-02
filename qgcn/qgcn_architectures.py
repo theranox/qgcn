@@ -7,7 +7,7 @@ class QGCN(torch.nn.Module):
     def __init__(self, dim_coor, out_dim, in_channels,
                 hidden_channels, out_channels, layers_num, dropout=0, num_kernels=1, 
                 use_bias=True, use_batchNorm=True, use_learnable_batchNorm=True, use_maxPool=False,
-                is_dataset_homogenous=True, apply_spatial_scalars=False, upper_bound_kernel_len=15, 
+                is_dataset_homogenous=True, apply_spatial_scalars=False, upper_bound_kernel_len=30, 
                 self_loops_included=False, initializer_model=None, device="cpu"):
         super(QGCN, self).__init__()
         self.device = device
@@ -39,8 +39,8 @@ class QGCN(torch.nn.Module):
                                     aggr="add",
                                     init="kaiming",
                                     is_dataset_homogenous=is_dataset_homogenous,
-                                    apply_spatial_scalars=apply_spatial_scalars, 
-                                    upper_bound_kernel_len=upper_bound_kernel_len, 
+                                    # apply_spatial_scalars=apply_spatial_scalars, 
+                                    # upper_bound_kernel_len=upper_bound_kernel_len, 
                                     self_loops_included=self_loops_included,
                                     device=self.device) ] + \
                             [ QNCL(
@@ -56,8 +56,8 @@ class QGCN(torch.nn.Module):
                                     aggr="add",
                                     init="kaiming",
                                     is_dataset_homogenous=is_dataset_homogenous,
-                                    apply_spatial_scalars=apply_spatial_scalars, 
-                                    upper_bound_kernel_len=upper_bound_kernel_len,
+                                    # apply_spatial_scalars=apply_spatial_scalars, 
+                                    # upper_bound_kernel_len=upper_bound_kernel_len,
                                     self_loops_included=self_loops_included,
                                     device=self.device) for _ in range(layers_num - 2) ] + \
                             [ QNCL(
@@ -73,15 +73,14 @@ class QGCN(torch.nn.Module):
                                     aggr="add",
                                     init="kaiming",
                                     is_dataset_homogenous=is_dataset_homogenous,
-                                    apply_spatial_scalars=apply_spatial_scalars, 
-                                    upper_bound_kernel_len=upper_bound_kernel_len,
+                                    # apply_spatial_scalars=apply_spatial_scalars, 
+                                    # upper_bound_kernel_len=upper_bound_kernel_len,
                                     self_loops_included=self_loops_included,
                                     device=self.device) ]
 
         # create a module list ...
         self.conv_layers = torch.nn.ModuleList(self.conv_layers)
         self.fc1 = torch.nn.Linear(out_channels, out_dim, bias=use_bias).to(self.device)
-
         # loop through all the conv layers and other layer components like MLPs etc.
         # and inject the layer index and initializers to match QGCN with CNN
         # NOTE: We do the below to enforce that both CNN and QGCN are initialized exactly the same
@@ -122,4 +121,3 @@ class QGCN(torch.nn.Module):
         if fc_bias_key_exists:
             fc_bias_param = self.initializer_named_params_dict[fc_bias_key]
             self.fc1.bias.data   = fc_bias_param.clone().detach().data
-        

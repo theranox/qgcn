@@ -66,6 +66,7 @@ class QNCL(MessagePassing):
             self.lin_out     = torch.nn.Linear(self.out_channels, self.out_channels, bias=self.use_bias).to(self.device)
  
         # Define bn layer for aggregation stage ...
+        self.relu = torch.nn.ReLU()
         self.bn1d = torch.nn.BatchNorm1d(self.out_channels, affine=use_learnable_batchNorm).to(self.device)
         
         # Define kernel related parameters
@@ -78,7 +79,7 @@ class QNCL(MessagePassing):
         # Initialize enough kernels so that in refinement stage, 
         # we only either remove or ignore them
         for kernel_idx in range(upper_bound_kernel_len):
-            self.init_kernel_weight_layer(kernel_idx=kernel_idx, init_new_kernels=True)
+            self.init_kernel_weight_layer(kernel_idx=kernel_idx)
 
             
     def forward(self, x, pos, edge_index):
@@ -127,7 +128,7 @@ class QNCL(MessagePassing):
         if self.apply_spatial_scalars:
             relative_pos = pos_j - pos_i
             spatial_scalars = relative_pos
-            for _, layer in enumerate([self.lin_in_head, F.relu, self.lin_in_bn1d, self.lin_in_tail, F.relu]):
+            for _, layer in enumerate([self.lin_in_head, self.relu, self.lin_in_bn1d, self.lin_in_tail, self.relu]):
                 spatial_scalars = layer(spatial_scalars)
             # scale the transformed features by the spatial properties
             assert x_j_transformed.shape == spatial_scalars.shape, "spatial_scalars must match dimension of x_j_transformed"
@@ -142,10 +143,10 @@ class QNCL(MessagePassing):
         aggr_out [num_nodes, label_dim, out_channels]
         """
         if self.apply_spatial_scalars:
-            aggr_out = F.relu(self.lin_out(aggr_out))
+            aggr_out = self.relu(self.lin_out(aggr_out))
         if self.use_batchNorm:
             aggr_out = self.bn1d(aggr_out)
-        aggr_out = F.relu(aggr_out)
+        aggr_out = self.relu(aggr_out)
         return aggr_out
     
 
@@ -166,8 +167,9 @@ class QNCL(MessagePassing):
     Goal: Establishing equivalence between CNN and QGCN 
     """
     def __del__(self):
-        for handler in self.full_backward_hooks_handlers:
-            handler.remove()
+        if hasattr(self, "full_backward_hooks_handlers"):
+            for handler in self.full_backward_hooks_handlers:
+                handler.remove()
 
 
     """
@@ -357,6 +359,7 @@ class QNCL(MessagePassing):
                 # Naive algorithm to find min kernel length/bin size such that in every neighborhood
                 # each source node is mapped to one specific kernel bin
                 max_angular_split = (max_node_degree - 1) if self_loop_exists else max_node_degree # add self loops for assigning kernels
+                max_angular_split = 1 if max_angular_split <= 0 else max_angular_split # minimum is 1 splits
                 upper_bound_angular_split_divs = self.upper_bound_kernel_len # upper bound for bins
                 while True:
                     mapping_successful, kernel_angle_range, target_source_kernel_idx_mapping = assign_kernel_idx_to_all_source_nodes(target_to_source_node_dir_mapping, max_angular_split, flag_dup=True)
@@ -399,70 +402,34 @@ class QNCL(MessagePassing):
         Algorithm currently is very naive so this will incur a huge loss in performance during training
     """
     def handle_kernel_weights_and_masks_update(self, edge_index, pos):
-        # Initialize control variables/signals
-        update_kernels = False
         # Set control variables
-        if len(self.kernel_weight_mask_map) == 0:
-            update_kernels = True
-            # search for what the optimal kernel length is for this batch of data
-            # Function below takes into account whether user specified a fixed kernel length
-            self.max_kernel_len, self.edge_index_mask_source = self.get_kernel_properties(edge_index, pos)
-
-        # Update control variables/signals
-        if (not update_kernels) and (not self.is_dataset_homogenous):
-            update_kernels = True
+        no_kernel_mapping_exists = len(self.kernel_weight_mask_map) == 0
+        larger_graph_subset_available = not no_kernel_mapping_exists and len(edge_index[0]) > len(self.kernel_weight_mask_map[list(self.kernel_weight_mask_map.keys())[0]])
+        # print("no_kernel_mapping_exists or larger_graph_subset_available or (not self.is_dataset_homogenous): ", no_kernel_mapping_exists or larger_graph_subset_available or (not self.is_dataset_homogenous))
+        if no_kernel_mapping_exists or larger_graph_subset_available or (not self.is_dataset_homogenous):
             # search for what the optimal kernel length is for this batch of data
             # Function below takes into account whether user specified a fixed kernel length
             max_kernel_len, edge_index_mask_source = self.get_kernel_properties(edge_index, pos)
             if max_kernel_len >= self.max_kernel_len:
-                if max_kernel_len <= self.upper_bound_kernel_len:
-                    self.max_kernel_len = max_kernel_len
-                    self.edge_index_mask_source = edge_index_mask_source
-                else:
-                    self.max_kernel_len = self.upper_bound_kernel_len # update max_kernel_len as bound
-                    self.max_kernel_len, self.edge_index_mask_source = self.get_kernel_properties(edge_index, pos, impose_module_max_kernel_len=True)
+                self.max_kernel_len = max_kernel_len
+                self.edge_index_mask_source = edge_index_mask_source
+                # Update kernel masks
+                for kernel_idx in range(self.max_kernel_len):
+                    self.kernel_weight_mask_map[kernel_idx] = self.edge_index_mask_source == kernel_idx # Create the mask map entry
             else:
-                # Impose the max kernel length found so far on the new batch and use that to partition local neighborhood space
-                self.max_kernel_len, self.edge_index_mask_source = self.get_kernel_properties(edge_index, pos, impose_module_max_kernel_len=True)
+                # Update the kernel to edge_index mapping
+                _, self.edge_index_mask_source = self.get_kernel_properties(edge_index, pos, impose_module_max_kernel_len=True)
+                for kernel_idx in range(self.max_kernel_len):
+                    self.kernel_weight_mask_map[kernel_idx] = self.edge_index_mask_source == kernel_idx # Create the mask map entry
 
-        # Initialize/Add new kernels and define their masks
-        # Only if control variables/signals have changed
-        if update_kernels:
-            for kernel_idx in range(self.max_kernel_len):
-                # Initialize a kernel for this kernel weight index
-                # NB: we reinitialize old kernels since mapping dictionary has changed
-                self.init_kernel_weight_layer(kernel_idx=kernel_idx, init_new_kernels=False)
-                self.kernel_weight_mask_map[kernel_idx] = self.edge_index_mask_source == kernel_idx # Create the mask map entry
-
-
+    
     """
     Assists with initializing new MLPs/weights in our adaptable kernel for the convolution
     """
-    def init_kernel_weight_layer(self, kernel_idx, init_new_kernels=True):
-        # create a new linear layer ...
-        lin_layer = None # placeholder
-        if init_new_kernels:
-            lin_layer = torch.nn.Conv1d(self.in_channels, self.out_channels, kernel_size=1, stride=1, bias=self.use_bias)
-            bh_handler = lin_layer.register_full_backward_hook(self._backward_hook, prepend=True)
-            self.full_backward_hooks_handlers.append(bh_handler)
-            self.kernels.append(lin_layer.to(self.device))
-        else: # Access the predefined layer/kernel and reinitialize
-            assert kernel_idx < self.upper_bound_kernel_len, f"Cannot init more kernels than {self.upper_bound_kernel_len} kernels"
-            lin_layer = self.kernels[kernel_idx]
-            
-        # Reinitialize weights and biases
-        if self.init == "kaiming":
-            torch.nn.init.kaiming_normal_(lin_layer.weight, mode='fan_in', nonlinearity='relu')
-            torch.nn.init.uniform_(lin_layer.bias)
-        elif self.init == "xavier":
-            torch.nn.init.xavier_normal_(lin_layer.weight, gain=nn.init.calculate_gain('relu'))
-            torch.nn.init.uniform_(lin_layer.bias)
-        else:
-            torch.nn.init.normal_(lin_layer.weight)
-            torch.nn.init.uniform_(lin_layer.bias)
-            
-        # Override with conv layer inits if available
-        if not init_new_kernels:
-            # Override the initializations if need be - used to enforce CNN == QGCN for iso comparison
-            self._override_conv_layer_initialization(kernel_idx=kernel_idx)
-            
+    def init_kernel_weight_layer(self, kernel_idx):
+        lin_layer = torch.nn.Conv1d(self.in_channels, self.out_channels, kernel_size=1, stride=1, bias=self.use_bias)
+        bh_handler = lin_layer.register_full_backward_hook(self._backward_hook, prepend=True)
+        self.full_backward_hooks_handlers.append(bh_handler)
+        self.kernels.append(lin_layer.to(self.device))
+        self._override_conv_layer_initialization(kernel_idx=kernel_idx)
+        
