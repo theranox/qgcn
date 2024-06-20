@@ -1,4 +1,4 @@
-# Quantized Graph Convolutional Networks (QGCNs) and Quantized Residual Graph Networks (QRGNs)
+# Convolutional Neural Networks (CNNs) vs. Quantized Graph Convolutional Networks (QGCNs) vs. Quantized Residual Graph Networks (QGRNs)
 
 # Dependencies
 - PyTorch >= 1.1
@@ -15,52 +15,70 @@ pip install wget torch-geometric torch-cluster torch-sparse torch-scatter
 
 # Running the code
 The results presented in the paper can be reproduced by either running the below commands directly from your command-line:
-To run CNN vs QGCN experiments on standard image datasets, run (from root of repo):
+To run CNN vs QGCN vs QGRN experiments on standard image datasets, run (from root of repo):
 ```python
-python3 run_experiments_qgcn_validation_cnn_qgcn_sgcn.py --dataset=standard  --notraineval
+python3 run_experiments_*.py --dataset=standard/custom/all  --notraineval
 ```
 
-To run QGCN vs SGCN experiments on custom Navier Stokes FEM graph datasets, run (from root of repo):
+For example:
+To run QGCN vs SGCN experiments on custom graph datasets, run (from root of repo):
 ```python
-python3 run_experiments_qgcn_validation_cnn_qgcn_sgcn.py --dataset=custom  --notraineval
+python3 run_experiments_qgcn_validation_cnn_qgcn_sgcn.py --dataset=custom --notraineval
 ```
 
 To run QGCN vs SGCN experiments on all datasets (both standard and custom), run (from root of repo):
 ```python
-python3 run_experiments_qgcn_validation_cnn_qgcn_sgcn.py --dataset=all  --notraineval
+python3 run_experiments_qgcn_validation_cnn_qgcn_sgcn.py --dataset=all --notraineval
 ```
 
-The below trains QRGN and SGCN on graphs with positional descriptors. 
+The below trains QGRN and SGCN on graphs with positional descriptors. 
 ```python
-python3 ./run_experiments_qrgn_validation_sgcn_qrgn_models.py --dataset=all --notraineval
+python3 ./run_experiments_qgrn_validation_sgcn_qgrn_models.py --dataset=all --notraineval
 ```
 
-The below trains QRGN and GCNConv on benchmark graph datasets without positional descriptors.
+The below trains QGRN and GCNConv on benchmark graph datasets without positional descriptors.
 ```python
-python3 ./run_experiments_qrgn_validation_gcnconv_qrgn_models.py --dataset=custom --notraineval
+python3 ./run_experiments_qgrn_validation_gcnconv_qgrn_models.py --dataset=custom --notraineval
 ```
 
 The below trains ChebConv and GraphConv on benchmark graph datasets without positional descriptors.
 ```python
-python3 ./run_experiments_qrgn_validation_chebconv_graphconv_models.py --dataset=custom --notraineval
+python3 ./run_experiments_qgrn_validation_chebconv_graphconv_models.py --dataset=custom --notraineval
 ```
 
 The below trains SGConv and GENConv on benchmark graph datasets without positional descriptors.
 ```python
-python3 ./run_experiments_qrgn_validation_sgconv_genconv_models.py --dataset=custom --notraineval
+python3 ./run_experiments_qgrn_validation_sgconv_genconv_models.py --dataset=custom --notraineval
 ```
 
 The below trains GeneralConv and GATv2Conv on benchmark graph datasets without positional descriptors.
 ```python
-python3 ./run_experiments_qrgn_validation_generalconv_gatv2conv_models.py --dataset=custom --notraineval
+python3 ./run_experiments_qgrn_validation_generalconv_gatv2conv_models.py --dataset=custom --notraineval
+```
+
+
+For full dataset (only applicable to standard image datasets: MNIST, FashionMNIST, CIFAR10), please run the below to first download and 
+compile a pytorch geometric dataset before running the corresponding python experiment files (training the models with the said data):
+```python
+python3 ./generate_rawgraph_data.py --dataset=MNIST
+```
+```python
+python3 ./generate_rawgraph_data.py --dataset=FashionMNIST
+```
+```python
+python3 ./generate_rawgraph_data.py --dataset=CIFAR10
 ```
 
 NOTE:
 - All the executable python files above have a `dataset_mapping` variable, which is a collection of all datasets to train the models on.
 - And the corresponding dataset splits to be trained on are defined inside the `datasets` dictionary.
-- All results generated can be found inside `./Experiments` directory
+- All results generated will be populated into `./Experiments` directory
 - Adding the flag `--profilemodels` to the command-lines will print out the model parameters, flops and wall clock times etc.
 - Adding the flag `--notraineval` to the command-lines will turn off evaluating training accuracies on the models
+- All the experimental runs have been moved into the experimental_runs directory (other than that all prior guidelines & outlines apply)
+- `--dataset=standard` will match all standard image datasets (i.e., MNIST, FashionMNIST, CIFAR10)
+- `--dataset=custom` will match all custom datasets (i.e., datasets we post-processed from TUDatasets Benchmark)
+- `--dataset=all` will match all datasets (i.e., both custom and standard)
 
 
 ## Other options
@@ -105,9 +123,12 @@ NOTE:
         - }
     -   }
     - NOTE: raw data is image data for training CNN models
+        - also qgcn / sgcn are just placeholder names for graph datasets hence 
+        - you'll find in the codebase that we read say sgcn/qgcn data to train qgrn model etc.
+        - TLDR: graph datasets are not model-specific throughout this codebase & qgcn/sgcn datasets are exactly the same graph datasets
 
 ## NOTES
-1. Datasets are stored on git-lfs storage servers
+1. Datasets, if not present, will be pulled in from dropbox / AWS wherever applicable
 2. Results published in paper aggregated results from the stats below:
     - test_acc_avg_of_smaxs
     - test_acc_std_of_smaxs
@@ -115,6 +136,6 @@ NOTE:
     - train_acc_std_of_smaxs
     - train_loss_avg_of_smaxs
     - train_loss_std_of_smaxs
-2. Assuming early stopping of models, it'd be reasonable to have reported the max stats instead but we chose not to because  it doesn't capture the dynamics during training as well as a smoothened (averaging) method would
-3. Notice in your experimental runs that max stats also supports the same equivalence claim, and much more strongly
+2. Assuming early stopping / check-pointing of models, it'd be reasonable to have reported the max stats instead but we chose not to because  it doesn't capture the dynamics during training as well as a smoothened (averaging) method does
+3. Notice in the experimental runs that max stats also supports the same equivalence claim, and much more strongly
 than the average stats but due to reason 2. we decided to use average stats

@@ -1,4 +1,4 @@
-# Main class called to train different models from CNN, QGCN, QGRN, SGCN
+# Main class called to train different models from CNN, QGCN, SGCN
 import shutil
 import os
 import sys
@@ -81,10 +81,8 @@ class Experiment:
       raw_test_data  = ImageDatasetWrapper(raw_x_test_data, raw_y_test_data)
 
       # get the geometric data ...
-      geometric_qgcn_train_data = data_struct["geometric"].get("gcn_train_data", None)
-      geometric_qgcn_test_data  = data_struct["geometric"].get("gcn_test_data", None)
-      geometric_qgcn_train_data = geometric_qgcn_train_data or data_struct["geometric"].get("qgcn_train_data", None)
-      geometric_qgcn_test_data  = geometric_qgcn_test_data or data_struct["geometric"].get("qgcn_test_data", None)
+      geometric_qgcn_train_data = data_struct["geometric"]["qgcn_train_data"]
+      geometric_qgcn_test_data  = data_struct["geometric"]["qgcn_test_data"]
       geometric_sgcn_train_data = data_struct["geometric"]["sgcn_train_data"]
       geometric_sgcn_test_data  = data_struct["geometric"]["sgcn_test_data"]
       # geometric_qgcn_train_data = torch_geometric.datasets.TUDataset(root="./data", name="PROTEINS", use_node_attr=True, use_edge_attr=True)
@@ -433,18 +431,18 @@ class Experiment:
     self.sgcn_specific_run_dir = sgcn_specific_run_dir
 
     # copy the architecture files into the relevant folders ...
-    cnn_source_filepath = os.path.join(base_path, "cnn", "architectures.py")
-    cnn_destination_filepath = os.path.join(self.cnn_specific_run_dir, "architectures.py")
+    cnn_source_filepath = os.path.join(base_path, "cnn", "cnn_architectures.py")
+    cnn_destination_filepath = os.path.join(self.cnn_specific_run_dir, "cnn_architectures.py")
     if not os.path.exists(cnn_destination_filepath):
       shutil.copyfile(cnn_source_filepath, cnn_destination_filepath)
     # copy the architecture files into the relevant folders ...
-    qgcn_source_filepath = os.path.join(base_path, "qgcn", "architectures.py")
-    qgcn_destination_filepath = os.path.join(self.qgcn_specific_run_dir, "architectures.py")
+    qgcn_source_filepath = os.path.join(base_path, "qgcn", "qgcn_architectures.py")
+    qgcn_destination_filepath = os.path.join(self.qgcn_specific_run_dir, "qgcn_architectures.py")
     if not os.path.exists(qgcn_destination_filepath):
       shutil.copyfile(qgcn_source_filepath, qgcn_destination_filepath)
     # copy the architecture files into the relevant folders ...
     sgcn_source_filepath = os.path.join(base_path, "sgcn", "src", "architectures.py")
-    sgcn_destination_filepath = os.path.join(self.sgcn_specific_run_dir, "architectures.py")
+    sgcn_destination_filepath = os.path.join(self.sgcn_specific_run_dir, "sgcn_architectures.py")
     if not os.path.exists(sgcn_destination_filepath):
       shutil.copyfile(sgcn_source_filepath, sgcn_destination_filepath)
 
@@ -541,8 +539,8 @@ class Experiment:
       print(f"Single epoch training... sgcn_model done{ profile_stats if self.profile_run else '' }")
       
     # if we want to cache the run, then cache them here ...
-    # if self.cache_run:
-    #   self.__cache_models() # cache the models ...
+    if self.cache_run:
+      self.__cache_models() # cache the models ...
 
     # normalize loss by the total length of training set ...
     if self.cnn_model_exists:

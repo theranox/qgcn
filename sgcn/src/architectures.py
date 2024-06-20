@@ -46,11 +46,11 @@ class SGCN(torch.nn.Module):
         return F.log_softmax(x, dim=1)
 
 
-class QRGN_Equiv_SGCN(torch.nn.Module):
+class QGRN_Equiv_SGCN(torch.nn.Module):
     def __init__(self, dim_coor, out_dim, input_features,
                  layers_num, model_dim, out_channels_1,
                  hidden_sf=2, out_sf=1, hidden_size=7, dropout=0, use_bias=True):
-        super(QRGN_Equiv_SGCN, self).__init__()
+        super(QGRN_Equiv_SGCN, self).__init__()
         self.layers_num = layers_num
 
         self.conv_layers =  [ SpatialGraphConvEquiv(coors=dim_coor,
