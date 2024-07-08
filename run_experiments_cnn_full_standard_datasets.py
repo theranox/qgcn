@@ -94,6 +94,8 @@ dataset_mapping = {
         "sgcn_hidden_sf": 2, 
         "sgcn_out_sf": 1, 
         "sgcn_hidden_size": 7,
+        # determines for QGCN whether to enable caching
+        'is_dataset_homogenous': True,
         # Dataset loc
         "image_to_graph_supported": False, # Specifies whether there's ability to support image tensor to torch geo data conversion during runtime
         "download_url": { # Used if dataset split for this dataset doesn't exist
@@ -124,6 +126,8 @@ dataset_mapping = {
         "sgcn_hidden_sf": 2, 
         "sgcn_out_sf": 1, 
         "sgcn_hidden_size": 5,
+        # determines for QGCN whether to enable caching
+        'is_dataset_homogenous': True,
         # Dataset loc
         "image_to_graph_supported": False, # Specifies whether there's ability to support image tensor to torch geo data conversion during runtime
         "download_url": { # Used if dataset split for this dataset doesn't exist
@@ -154,6 +158,8 @@ dataset_mapping = {
         "sgcn_hidden_sf": 2, 
         "sgcn_out_sf": 1, 
         "sgcn_hidden_size": 4,
+        # determines for QGCN whether to enable caching
+        'is_dataset_homogenous': True,
         # Dataset loc
         "image_to_graph_supported": False, # Specifies whether there's ability to support image tensor to torch geo data conversion during runtime
         "download_url": { # Used if dataset split for this dataset doesn't exist
